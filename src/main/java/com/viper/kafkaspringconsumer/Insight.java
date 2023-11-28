@@ -23,6 +23,9 @@ public class Insight {
     @Column(updatable = false)
     protected Long id;
 
+    @Column(name="topic", nullable = true)
+    private String topic;
+
     @Column(name="key", nullable = true)
     private String key;
 
