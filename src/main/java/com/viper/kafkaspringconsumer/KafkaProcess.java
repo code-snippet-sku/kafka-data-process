@@ -2,6 +2,7 @@ package com.viper.kafkaspringconsumer;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -25,23 +26,34 @@ public class KafkaProcess {
 
     @KafkaListener(topics = "my-topic", groupId = "my-group", concurrency = "3")
     public void listenAndParseData(ConsumerRecord<String, String> record) {
+        System.out.println("최초 record.key() = "+ record.key());
+        System.out.println("최초 record.value() = "+ record.value());
+        String logData = record.value();
+        // JSON 데이터 파싱
+        String jsonStr = extractJson(logData);
+        JsonNode logJson = parseJson(jsonStr);
 
+        // 필요한 필드 선택
+        JsonNode result = selectFields(logJson, "HTTP_HOST", "HTTP_X_REAL_IP", "HTTP_USER_AGENT", "QUERY_E_C", "QUERY_E_A", "QUERY_E_N", "QUERY_URL", "REMOTE_ADDR");
+
+        // 결과 출력
+        System.out.println("필요한 필드만 뽑아 Json으로 파싱한 데이터 : " + result);
         // 최초 수집 데이터를 db에 저장
-        final Insight insight = Insight.toEntity(record.key(), record.value());
-        insightRepository.save(insight);
-        try {
-            List<KafkaRecord> kafkaRecordList = dataToKafkaRecordList(record.value());
-            // 여기서 record를 파싱
 
-            for(KafkaRecord kafkaRecord : kafkaRecordList){
-                kafkaRecord.setValue(kafkaRecord.getValue()+ " - parsed");
-                // 파싱한 데이터를 다시 Kafka에 전송
-                kafkaTemplate.send("parsed-data-topic-test", kafkaRecord.getKey(), kafkaRecord.getValue());
-            }
 
-        }catch(IOException e){
-            e.printStackTrace();
-        }
+//        try {
+//            List<KafkaRecord> kafkaRecordList = dataToKafkaRecordList(record.value());
+//            // 여기서 record를 파싱
+//
+//            for(KafkaRecord kafkaRecord : kafkaRecordList){
+//                kafkaRecord.setValue(kafkaRecord.getValue()+ " - parsed");
+//                // 파싱한 데이터를 다시 Kafka에 전송
+//                kafkaTemplate.send("parsed-data-topic-test", kafkaRecord.getKey(), kafkaRecord.getValue());
+//            }
+//
+//        }catch(IOException e){
+//            e.printStackTrace();
+//        }
 
 
     }
@@ -83,28 +95,56 @@ public class KafkaProcess {
     }
 
 
-    private List<KafkaRecord> saveToKeyValueStore(JsonNode jsonNode) {
-        Iterator<Map.Entry<String, JsonNode>> fields = jsonNode.fields();
-        List<KafkaRecord> kafkaRecordList = new ArrayList<>();
-        while (fields.hasNext()) {
-            Map.Entry<String, JsonNode> topicEntry = fields.next();
-            String key = topicEntry.getKey();
-            String value = topicEntry.getValue().asText();
-            kafkaRecordList.add(KafkaRecord.builder()
-                    .key(key)
-                    .value(value)
-                    .build());
+//    private List<KafkaRecord> saveToKeyValueStore(JsonNode jsonNode) {
+//        Iterator<Map.Entry<String, JsonNode>> fields = jsonNode.fields();
+//        List<KafkaRecord> kafkaRecordList = new ArrayList<>();
+//        while (fields.hasNext()) {
+//            Map.Entry<String, JsonNode> topicEntry = fields.next();
+//            String key = topicEntry.getKey();
+//            String value = topicEntry.getValue().asText();
+//            kafkaRecordList.add(KafkaRecord.builder()
+//                    .key(key)
+//                    .value(value)
+//                    .build());
+//        }
+//        return kafkaRecordList;
+//    }
+//
+//    private List<KafkaRecord> dataToKafkaRecordList(String jsonString) throws IOException {
+//        JsonNode jsonNode = jsonStringToJsonObject(jsonString);
+//        return saveToKeyValueStore(jsonNode);
+//    }
+//
+//    private static JsonNode jsonStringToJsonObject(String jsonString) throws IOException {
+//        ObjectMapper objectMapper = new ObjectMapper();
+//        return objectMapper.readTree(jsonString);
+//    }
+
+
+    private static JsonNode parseJson(String jsonData) {
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            return objectMapper.readTree(jsonData);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
         }
-        return kafkaRecordList;
     }
-
-    private List<KafkaRecord> dataToKafkaRecordList(String jsonString) throws IOException {
-        JsonNode jsonNode = jsonStringToJsonObject(jsonString);
-        return saveToKeyValueStore(jsonNode);
+    private static String extractJson(String logData) {
+        int jsonStartIndex = logData.indexOf('{');
+        int jsonEndIndex = logData.lastIndexOf('}');
+        return logData.substring(jsonStartIndex, jsonEndIndex + 1);
     }
-
-    private static JsonNode jsonStringToJsonObject(String jsonString) throws IOException {
+    private static JsonNode selectFields(JsonNode jsonNode, String... fieldNames) {
         ObjectMapper objectMapper = new ObjectMapper();
-        return objectMapper.readTree(jsonString);
+        JsonNode result = objectMapper.createObjectNode();
+
+        for (String fieldName : fieldNames) {
+            if (jsonNode.has(fieldName)) {
+                ((ObjectNode) result).put(fieldName, jsonNode.get(fieldName));
+            }
+        }
+
+        return result;
     }
 }
